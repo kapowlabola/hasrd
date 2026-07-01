@@ -1,36 +1,46 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 
 /**
- * The HASRD-ous advantage
+ * The HASRD-ous Advantage
  * Interactive companion to a master's thesis on wind modeling for direct-fire
  * ballistics (Paola Kefallinos, Northeastern University).
  *
- * Pages: 0 intro (unnumbered) -> 1 Ballistic simulations background
- * -> 2 Wind background -> 3 HASRD wind stratification -> 4 Shooting gallery
+ * Pages: 0 Intro (unnumbered) -> 1 Ballistic Simulations Background
+ * -> 2 Wind Background -> 3 HASRD Wind Stratification -> 4 Shooting Gallery
  *
  * Self-contained. No backend, no browser storage. All numbers hardcoded and
  * calibrated to reproduce the published thesis results (verified by Monte Carlo).
  */
 
 // ---------------------------------------------------------------------------
-// Palette
+// Palette — "clean military": olive canvas, cream panels, dark brown text
 // ---------------------------------------------------------------------------
 const PAL = {
-  canvas: "#F2EBD8",
-  text: "#2E2C22",
-  text2: "#6E6A57",
-  hasrd: "#41696A",
-  legacy: "#9E9A85",
+  canvas: "#4A5738",        // olive drab background
+  canvasText: "#F4F0E2",    // cream / soft white text on olive
+  canvasMuted: "#C7C4A4",   // muted khaki text on olive (secondary)
+  panel: "#FBF8EE",         // cream panel background
+  text: "#3B2E22",          // dark brown — primary text on cream panels
+  text2: "#8A7A5F",         // muted brown — secondary text on cream panels
+  wind: "#AFD4E8",          // pale baby blue — wind, everywhere
+  windLineA: "#8FC2E0",
+  windLineB: "#5E97BE",
+  windLineC: "#375E7A",
+  windPop: "#7FC7EE",       // brighter blue for dark viewport
+  turbulence: "#D98BA6",    // pink — turbulence (distinct from wind blue)
+  turbulenceDeep: "#B85C7C",
+  legacy: "#A7A488",
+  legacyShades: ["#DEDBC3", "#BEBB9F", "#96937A"], // calm / proving / combat
+  legacyPop: "#C9CDC2",     // brighter neutral gray for dark viewport
   terra: "#A8512F",
-  terraBright: "#C25A33",
+  terraBright: "#EA7A2E",   // brighter pop orange for dark viewport + accents
   grass: "#8A8E74",
   bushes: "#6B7350",
-  forest: "#3A3D22",
-  viewport: "#272A18",
-  viewportField: "#2F331E",
-  reticle: "rgba(155,170,120,0.22)",
-  mono: "#C9CBB0",
-  paper: "#FFFFFF",
+  forest: "#333823",
+  viewport: "#1E2216",
+  viewportField: "#252A1B",
+  reticle: "rgba(200,210,180,0.18)",
+  mono: "#EFEBDA",
 };
 
 // ---------------------------------------------------------------------------
@@ -48,7 +58,7 @@ function sigmaForTerrain(t) {
     : 2.433 + (0.654 - 2.433) * ((t - 0.5) / 0.5);
 }
 function terrainName(t) {
-  if (t < 0.25) return "Grassy field";
+  if (t < 0.25) return "Grassy Field";
   if (t < 0.75) return "Bushes";
   return "Forest";
 }
@@ -73,15 +83,11 @@ function erf(x) {
   return s * y;
 }
 const insideProb = (a, s) => (s > 0 ? erf(a / (s * Math.SQRT2)) : 1);
-
 function phit(sigma, R) {
-  const sy = Math.sqrt(
-    Math.pow(sigma * A * rangeDrift(R), 2) + Math.pow(SB * rangeBase(R), 2)
-  );
+  const sy = Math.sqrt(Math.pow(sigma * A * rangeDrift(R), 2) + Math.pow(SB * rangeBase(R), 2));
   const sx = SB * rangeBase(R);
   return insideProb(HALF, sx) * insideProb(HALF, sy);
 }
-
 function makeRng(seed) {
   let a = seed >>> 0;
   const u = () => {
@@ -117,32 +123,6 @@ function impact(sigma, R, g) {
   const x = g() * SB * rangeBase(R);
   return [x, y];
 }
-
-function hexRgb(h) {
-  h = h.replace("#", "");
-  return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
-}
-function rgbHex(a) {
-  return (
-    "#" +
-    a
-      .map((v) =>
-        Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")
-      )
-      .join("")
-  );
-}
-function lerpHex(a, b, t) {
-  const A2 = hexRgb(a),
-    B2 = hexRgb(b);
-  return rgbHex(A2.map((v, i) => v + (B2[i] - v) * t));
-}
-function terrainColor(t) {
-  return t <= 0.5
-    ? lerpHex(PAL.grass, PAL.bushes, t / 0.5)
-    : lerpHex(PAL.bushes, PAL.forest, (t - 0.5) / 0.5);
-}
-
 const fmtPct = (p) => (p * 100).toFixed(1);
 const reduceMotion = () =>
   typeof window !== "undefined" &&
@@ -166,17 +146,36 @@ function Arrow({ x1, y1, x2, y2, color, width = 2, dash, opacity = 1 }) {
     </g>
   );
 }
-function Swirl({ cx, cy, r = 9, color, width = 1.5 }) {
-  const d = `M ${cx + r} ${cy} A ${r} ${r} 0 1 1 ${cx} ${cy - r} A ${r * 0.55} ${r * 0.55} 0 1 0 ${cx - r * 0.35} ${cy}`;
-  return <path d={d} fill="none" stroke={color} strokeWidth={width} strokeLinecap="round" opacity={0.85} />;
+// proper inward-spiraling swirl for turbulence
+function Swirl({ cx, cy, r = 10, color, width = 1.6, turns = 2.4 }) {
+  const N = 48;
+  let d = "";
+  for (let i = 0; i <= N; i++) {
+    const f = i / N;
+    const theta = f * turns * 2 * Math.PI;
+    const rad = r * (1 - f) + 0.6;
+    const x = cx + rad * Math.cos(theta);
+    const y = cy + rad * Math.sin(theta);
+    d += `${i === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)} `;
+  }
+  return <path d={d} fill="none" stroke={color} strokeWidth={width} strokeLinecap="round" opacity={0.9} />;
 }
-function FlowBox({ x, y, w, h, fill, stroke, children, fontSize = 11.5, bold, color }) {
+function FlowBox({ x, y, w, h, fill, stroke, children, fontSize = 11.5, bold, color, lines }) {
+  const cy = y + h / 2;
   return (
     <g>
-      <rect x={x} y={y} width={w} height={h} rx={3} fill={fill} stroke={stroke} strokeWidth={1} />
-      <text x={x + w / 2} y={y + h / 2 + fontSize * 0.35} textAnchor="middle" fontSize={fontSize} fontWeight={bold ? 700 : 400} fill={color || PAL.text}>
-        {children}
-      </text>
+      <rect x={x} y={y} width={w} height={h} rx={3} fill={fill} stroke={stroke} strokeWidth={1.2} />
+      {lines ? (
+        <text x={x + w / 2} y={cy - ((lines.length - 1) * fontSize * 0.6)} textAnchor="middle" fontSize={fontSize} fontWeight={bold ? 700 : 400} fill={color || PAL.text}>
+          {lines.map((ln, i) => (
+            <tspan key={i} x={x + w / 2} dy={i === 0 ? 0 : fontSize * 1.2}>{ln}</tspan>
+          ))}
+        </text>
+      ) : (
+        <text x={x + w / 2} y={cy + fontSize * 0.35} textAnchor="middle" fontSize={fontSize} fontWeight={bold ? 700 : 400} fill={color || PAL.text}>
+          {children}
+        </text>
+      )}
     </g>
   );
 }
@@ -185,13 +184,13 @@ function FlowArrow({ x1, y1, x2, y2, color = PAL.text2 }) {
 }
 
 // ---------------------------------------------------------------------------
-// Stepper (screens 1-4; intro is unnumbered)
+// Stepper
 // ---------------------------------------------------------------------------
 const STEPS = [
-  "1 · Ballistic simulations background",
-  "2 · Wind background",
-  "3 · HASRD wind stratification",
-  "4 · Shooting gallery",
+  "1 · Ballistic Simulations Background",
+  "2 · Wind Background",
+  "3 · HASRD Wind Stratification",
+  "4 · Shooting Gallery",
 ];
 function Stepper({ screen, setScreen }) {
   return (
@@ -211,11 +210,11 @@ function Stepper({ screen, setScreen }) {
               cursor: "pointer",
               padding: "8px 10px 12px",
               textAlign: "left",
-              color: active ? PAL.text : PAL.text2,
+              color: active ? PAL.canvasText : PAL.canvasMuted,
               fontWeight: active ? 600 : 400,
-              fontSize: 13,
+              fontSize: 12.5,
               letterSpacing: 0.2,
-              borderTop: `2px solid ${active ? PAL.terra : "rgba(110,106,87,0.3)"}`,
+              borderTop: `2px solid ${active ? PAL.terraBright : "rgba(244,240,226,0.25)"}`,
             }}
           >
             {label}
@@ -227,36 +226,39 @@ function Stepper({ screen, setScreen }) {
 }
 
 // ---------------------------------------------------------------------------
-// Shared header (eyebrow with bolded acronym letters + centered subtitle)
+// Shared header — eyebrow + H1 always; long description only when full=true
 // ---------------------------------------------------------------------------
 const EYEBROW_WORDS = ["Height", "And", "Surface", "Roughness", "Dependent"];
-function Header() {
+function Header({ full }) {
   return (
     <header style={{ marginBottom: 18, textAlign: "center" }}>
-      <div style={{ fontSize: 12, letterSpacing: 1.5, textTransform: "uppercase", color: PAL.terra }}>
+      <div style={{ fontSize: 12, letterSpacing: 1.5, textTransform: "uppercase", color: PAL.terraBright }}>
         {EYEBROW_WORDS.map((w) => (
           <span key={w}>
             <strong>{w[0]}</strong>
             {w.slice(1)}{" "}
           </span>
         ))}
-        <span>wind</span>
+        <span>Wind</span>
       </div>
-      <h1 style={{ fontSize: 30, margin: "4px 0 0", fontWeight: 700, letterSpacing: -0.5 }}>
-        The HASRD-ous advantage
+      <h1 style={{ fontSize: 30, margin: "4px 0 0", fontWeight: 700, letterSpacing: -0.5, color: PAL.canvasText }}>
+        The HASRD-ous Advantage
       </h1>
-      <p style={{ color: PAL.text2, margin: "10px auto 0", maxWidth: 700, fontSize: 14.5, lineHeight: 1.6, textAlign: "center" }}>
-        This study presents a Height and Surface Roughness Dependent (HASRD)
-        wind model that dynamically integrates mean wind stratification,
-        turbulence, and global land cover data to predict ballistic trajectory
-        with greater accuracy than legacy models. The new model produces
-        statistically significant improvements in downrange deflection and
-        first-round hit probability predictions, with the most dramatic
-        effects on terrain featuring extreme surface roughness profiles. By
-        capturing how terrain influences wind speed and variability, the
-        HASRD approach enhances weapon system accuracy for direct fire
-        engagement across diverse geographic and climatic conditions.
-      </p>
+      {full && (
+        <p style={{ color: PAL.canvasMuted, margin: "10px auto 0", maxWidth: 700, fontSize: 14.5, lineHeight: 1.6, textAlign: "center" }}>
+          This study presents a Height and Surface Roughness Dependent (HASRD)
+          wind model that dynamically integrates mean wind stratification,
+          turbulence, and global land cover data to predict ballistic
+          trajectory with greater accuracy than legacy models. The new model
+          produces statistically significant improvements in downrange
+          deflection and first-round hit probability predictions, with the
+          most dramatic effects on terrain featuring extreme surface
+          roughness profiles. By capturing how terrain influences wind speed
+          and variability, the HASRD approach enhances weapon system
+          accuracy for direct fire engagement across diverse geographic and
+          climatic conditions.
+        </p>
+      )}
     </header>
   );
 }
@@ -265,40 +267,37 @@ function Header() {
 // INTRO PAGE (unnumbered)
 // ---------------------------------------------------------------------------
 function IntroDiagram() {
-  // simplified, original schematic in the app's own palette — inputs feed a
-  // simulation model, which produces a trajectory toward a target.
   const W = 640, H = 230;
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Diagram: atmospheric conditions, ballistics, and range feed a ballistic simulation model, which produces a trajectory toward a target." style={{ display: "block" }}>
-      <FlowBox x={16} y={30} w={140} h={26} fill="#EAF1EE" stroke={PAL.hasrd}>Atmospheric conditions</FlowBox>
-      <FlowBox x={16} y={62} w={140} h={26} fill="#EAF1EE" stroke={PAL.hasrd}>Ballistics</FlowBox>
-      <FlowBox x={16} y={94} w={140} h={26} fill="#EAF1EE" stroke={PAL.hasrd}>Range</FlowBox>
-      <FlowArrow x1={158} y1={72} x2={196} y2={72} />
-      <FlowBox x={198} y={40} w={150} h={64} fill="#fff" stroke={PAL.text} bold fontSize={12}>Ballistic simulation model</FlowBox>
-      <FlowArrow x1={350} y1={72} x2={388} y2={72} />
-      <FlowBox x={390} y={58} w={150} h={28} fill="#F4ECE0" stroke={PAL.terra} color={PAL.terra} bold>Trajectory</FlowBox>
+      <FlowBox x={16} y={30} w={150} h={26} fill="#EFEAD9" stroke={PAL.windLineB}>Atmospheric Conditions</FlowBox>
+      <FlowBox x={16} y={62} w={150} h={26} fill="#EFEAD9" stroke={PAL.windLineB}>Ballistics</FlowBox>
+      <FlowBox x={16} y={94} w={150} h={26} fill="#EFEAD9" stroke={PAL.windLineB}>Range</FlowBox>
+      <FlowArrow x1={168} y1={72} x2={202} y2={72} />
+      <FlowBox x={204} y={38} w={168} h={68} fill="#fff" stroke={PAL.text} bold fontSize={13} lines={["Ballistic Simulation", "Model"]} />
+      <FlowArrow x1={374} y1={72} x2={408} y2={72} />
+      <FlowBox x={410} y={58} w={150} h={28} fill="#F4E3D2" stroke={PAL.terra} color={PAL.terra} bold>Trajectory</FlowBox>
 
-      {/* arc + tank + target */}
       <line x1={40} y1={200} x2={600} y2={200} stroke={PAL.text2} strokeWidth={1.5} />
-      <path d="M 60 200 Q 300 110 560 190" fill="none" stroke={PAL.hasrd} strokeWidth={2.5} strokeDasharray="1 6" strokeLinecap="round" />
-      <rect x={38} y={186} width={26} height={12} rx={2} fill={PAL.text} />
-      <rect x={556} y={176} width={2.3 * 8} height={2.3 * 8} fill="none" stroke={PAL.terra} strokeWidth={2} />
-      <text x={51} y={216} textAnchor="middle" fontSize={10} fill={PAL.text2}>Shooter</text>
-      <text x={568} y={220} textAnchor="middle" fontSize={10} fill={PAL.text2}>Target</text>
+      <path d="M 64 200 Q 320 108 556 191" fill="none" stroke={PAL.windLineB} strokeWidth={2.5} strokeDasharray="1 6" strokeLinecap="round" />
+      <rect x={40} y={188} width={26} height={12} rx={2} fill={PAL.text} />
+      <rect x={548} y={173} width={2.3 * 8} height={2.3 * 8} fill="none" stroke={PAL.terra} strokeWidth={2} />
+      <text x={53} y={218} textAnchor="middle" fontSize={10} fill={PAL.text2}>Tank</text>
+      <text x={566} y={218} textAnchor="middle" fontSize={10} fill={PAL.text2}>Target</text>
     </svg>
   );
 }
 function Intro({ onStart }) {
   return (
     <div style={{ maxWidth: 760, margin: "0 auto", textAlign: "center", padding: "40px 6px" }}>
-      <h1 style={{ fontSize: 26, lineHeight: 1.35, fontWeight: 700, margin: "0 0 22px", letterSpacing: -0.3 }}>
-        The effect of surface roughness on crosswind drift and probability of
-        hit for large caliber direct fire ballistics
+      <h1 style={{ fontSize: 26, lineHeight: 1.35, fontWeight: 700, margin: "0 0 22px", letterSpacing: -0.3, color: PAL.canvasText }}>
+        The Effect of Surface Roughness on Crosswind Drift and Probability of
+        Hit for Large Caliber Direct-Fire Ballistics
       </h1>
-      <p style={{ margin: "0 0 4px", fontSize: 15, color: PAL.text }}>
+      <p style={{ margin: "0 0 4px", fontSize: 15, color: PAL.canvasText }}>
         Results from a Master's thesis by <strong>Paola Kefallinos</strong>
       </p>
-      <p style={{ margin: "0 0 30px", fontSize: 13.5, color: PAL.text2 }}>
+      <p style={{ margin: "0 0 30px", fontSize: 13.5, color: PAL.canvasMuted }}>
         Department of Mechanical and Industrial Engineering · Northeastern University
       </p>
 
@@ -306,112 +305,179 @@ function Intro({ onStart }) {
         <IntroDiagram />
       </div>
 
-      <button onClick={onStart} style={{ ...btnPrimary, fontSize: 15, padding: "12px 28px" }}>
-        Get started →
+      <Header full />
+
+      <button onClick={onStart} style={{ ...btnPrimary, fontSize: 15, padding: "12px 28px", marginTop: 10 }}>
+        Get Started →
       </button>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// PAGE 1 — Ballistic simulations background
+// PAGE 1 — Ballistic Simulations Background
 // ---------------------------------------------------------------------------
 function TrajectoryGif() {
   const rm = reduceMotion();
   return (
     <svg viewBox="0 0 360 160" width="100%" role="img" aria-label="Animated trajectory arc governed by Newton's second law." style={{ display: "block" }}>
       <line x1={20} y1={140} x2={340} y2={140} stroke={PAL.text2} strokeWidth={1.5} />
-      <path id="traj-path" d="M 30 140 Q 180 20 330 130" fill="none" stroke={PAL.hasrd} strokeWidth={2.5} strokeDasharray="1 6" />
-      <rect x={330} y={118} width={16} height={16} fill="none" stroke={PAL.terra} strokeWidth={2} />
+      <rect x={330} y={124} width={16} height={16} fill="none" stroke={PAL.terra} strokeWidth={2} />
       {!rm ? (
-        <circle r={5} fill={PAL.terraBright}>
-          <animateMotion dur="2.4s" repeatCount="indefinite" path="M 30 140 Q 180 20 330 130" />
+        <circle r={5} fill={PAL.windLineC}>
+          <animateMotion dur="2.4s" repeatCount="indefinite" path="M 30 140 Q 180 20 330 132" />
         </circle>
       ) : (
-        <circle cx={180} cy={35} r={5} fill={PAL.terraBright} />
+        <circle cx={180} cy={35} r={5} fill={PAL.windLineC} />
       )}
+      <path d="M 30 140 Q 180 20 330 132" fill="none" stroke={PAL.windLineB} strokeWidth={2} strokeDasharray="1 6" opacity={0.7} />
     </svg>
   );
 }
+
+function stackYs(centerY, n, h, gap) {
+  const total = n * h + (n - 1) * gap;
+  const top = centerY - total / 2;
+  return Array.from({ length: n }, (_, i) => top + i * (h + gap));
+}
+
 function FlowDiagram({ mode }) {
   const real = mode === "real";
-  const W = 640, H = real ? 250 : 230;
+  const W = 660, H = 260;
+  const centerY = 96;
+  const inputH = 22, inputGap = 8;
+  const inputLabels = real
+    ? ["Atmospheric Conditions", "Ballistics", "Range", "Error Budgets"]
+    : ["Atmospheric Conditions", "Ballistics", "Range"];
+  const inputYs = stackYs(centerY, inputLabels.length, inputH, inputGap);
+  const inputBottom = inputYs[inputYs.length - 1] + inputH;
+
+  const modelW = 190, modelH = 78;
+  const modelY = centerY - modelH / 2;
+
+  const outputYs = real ? [centerY - 22] : stackYs(centerY, 2, inputH, inputGap);
+
+  const groundY = H - 28;
+
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={real ? "Real world: inputs plus error budgets feed the model, producing a probability of hit and a possible miss." : "Ideal world: inputs feed the model, producing super elevation and time of flight."} style={{ display: "block" }}>
-      <text x={W / 2} y={20} textAnchor="middle" fontSize={13} fontWeight={700} fill={real ? PAL.terra : PAL.hasrd}>
-        {real ? "Real world" : "Ideal world"}
+      <text x={W / 2} y={20} textAnchor="middle" fontSize={13} fontWeight={700} fill={real ? PAL.terra : PAL.windLineC}>
+        {real ? "Real World" : "Ideal World"}
       </text>
 
-      <FlowBox x={16} y={40} w={150} h={22} fill="#EAF1EE" stroke={PAL.hasrd} fontSize={11}>Atmospheric conditions</FlowBox>
-      <FlowBox x={16} y={66} w={150} h={22} fill="#EAF1EE" stroke={PAL.hasrd} fontSize={11}>Ballistics</FlowBox>
-      <FlowBox x={16} y={92} w={150} h={22} fill="#EAF1EE" stroke={PAL.hasrd} fontSize={11}>Range</FlowBox>
-      {real && <FlowBox x={16} y={118} w={150} h={22} fill="#F4E3DA" stroke={PAL.terra} color={PAL.terra} bold fontSize={11}>Error budgets</FlowBox>}
+      {inputLabels.map((lab, i) => {
+        const isErr = real && i === inputLabels.length - 1;
+        return (
+          <FlowBox key={lab} x={16} y={inputYs[i]} w={168} h={inputH} fill={isErr ? "#F4E3D2" : "#EFEAD9"} stroke={isErr ? PAL.terra : PAL.windLineB} color={isErr ? PAL.terra : PAL.text} bold={isErr} fontSize={11}>
+            {lab}
+          </FlowBox>
+        );
+      })}
 
-      <FlowArrow x1={168} y1={real ? 80 : 68} x2={206} y2={real ? 80 : 68} />
-      <FlowBox x={208} y={44} w={150} h={62} fill="#fff" stroke={PAL.text} bold fontSize={11.5}>
-        <>Ballistic simulation model</>
-      </FlowBox>
-      <FlowArrow x1={360} y1={real ? 80 : 68} x2={398} y2={real ? 80 : 68} />
+      <FlowArrow x1={186} y1={centerY} x2={222} y2={centerY} />
+      <FlowBox x={224} y={modelY} w={modelW} h={modelH} fill="#fff" stroke={PAL.text} bold fontSize={12.5} lines={["Ballistic Simulation", "Model"]} />
+      <FlowArrow x1={224 + modelW} y1={centerY} x2={224 + modelW + 36} y2={centerY} />
 
       {real ? (
-        <FlowBox x={400} y={56} w={160} h={40} fill="#F4E3DA" stroke={PAL.terra} color={PAL.terra} bold fontSize={13}>
-          Probability of hit
+        <FlowBox x={224 + modelW + 38} y={outputYs[0]} w={168} h={44} fill="#F4E3D2" stroke={PAL.terra} color={PAL.terra} bold fontSize={13}>
+          Probability of Hit
         </FlowBox>
       ) : (
         <>
-          <FlowBox x={400} y={40} w={160} h={22} fill="#EDE7F2" stroke={PAL.hasrd} fontSize={11}>Super elevation</FlowBox>
-          <FlowBox x={400} y={66} w={160} h={22} fill="#EDE7F2" stroke={PAL.hasrd} fontSize={11}>Time of flight</FlowBox>
+          <FlowBox x={224 + modelW + 38} y={outputYs[0]} w={168} h={inputH} fill="#E9F0F4" stroke={PAL.windLineB} fontSize={11}>Super Elevation</FlowBox>
+          <FlowBox x={224 + modelW + 38} y={outputYs[1]} w={168} h={inputH} fill="#E9F0F4" stroke={PAL.windLineB} fontSize={11}>Time of Flight</FlowBox>
         </>
       )}
 
-      {/* trajectory */}
-      <line x1={40} y1={H - 30} x2={600} y2={H - 30} stroke={PAL.text2} strokeWidth={1.5} />
-      <path
-        d={real ? "M 60 " + (H - 30) + " Q 300 " + (H - 130) + " 480 " + (H - 55) : "M 60 " + (H - 30) + " Q 300 " + (H - 140) + " 560 " + (H - 40)}
-        fill="none"
-        stroke={real ? PAL.terraBright : PAL.hasrd}
-        strokeWidth={2.5}
-      />
-      <rect x={38} y={H - 44} width={26} height={12} rx={2} fill={PAL.text} />
-      <rect x={real ? 556 : 556} y={H - 54} width={2.3 * 8} height={2.3 * 8} fill="none" stroke={PAL.text} strokeWidth={2} />
-      {real && (
+      {/* ground + tank + trajectory + target, all aligned to a single ground line */}
+      <line x1={40} y1={groundY} x2={W - 40} y2={groundY} stroke={PAL.text2} strokeWidth={1.5} />
+      <rect x={44} y={groundY - 14} width={28} height={14} rx={2} fill={PAL.text} />
+      <text x={58} y={groundY + 16} textAnchor="middle" fontSize={10} fill={PAL.text2}>Tank</text>
+
+      {real ? (
         <>
-          <line x1={476} y1={H - 60} x2={498} y2={H - 78} stroke={PAL.terraBright} strokeWidth={2} />
-          <text x={498} y={H - 82} fontSize={11} fontWeight={700} fill={PAL.terraBright}>Miss</text>
+          <path d={`M 74 ${groundY} Q ${W / 2} ${groundY - 130} ${W - 220} ${groundY}`} fill="none" stroke={PAL.terraBright} strokeWidth={2.5} />
+          <line x1={W - 226} y1={groundY - 10} x2={W - 214} y2={groundY + 10} stroke={PAL.terraBright} strokeWidth={2.5} />
+          <line x1={W - 214} y1={groundY - 10} x2={W - 226} y2={groundY + 10} stroke={PAL.terraBright} strokeWidth={2.5} />
+          <text x={W - 220} y={groundY - 20} textAnchor="middle" fontSize={11} fontWeight={700} fill={PAL.terraBright}>Miss</text>
+          <rect x={W - 122} y={groundY - 18} width={2.3 * 8} height={2.3 * 8} fill="none" stroke={PAL.text} strokeWidth={2} />
+          <text x={W - 104} y={groundY + 16} textAnchor="middle" fontSize={10} fill={PAL.text2}>Target</text>
+        </>
+      ) : (
+        <>
+          <path d={`M 74 ${groundY} Q ${W / 2} ${groundY - 130} ${W - 104} ${groundY}`} fill="none" stroke={PAL.windLineC} strokeWidth={2.5} />
+          <rect x={W - 122} y={groundY - 18} width={2.3 * 8} height={2.3 * 8} fill="none" stroke={PAL.terra} strokeWidth={2} />
+          <text x={W - 104} y={groundY + 16} textAnchor="middle" fontSize={10} fill={PAL.text2}>Target</text>
         </>
       )}
     </svg>
   );
 }
+
 function CrosswindDiagram() {
-  const W = 640, H = 190;
-  const lineY = 100;
+  const W = 660, H = 230;
+  const lineY = 70, tankX = 66, targetX = 566;
+  // deflected top-down trajectory, pushed upward by crosswind, missing above target
+  const missX = 500, missY = 122;
+  const bez = (t) => {
+    const p0 = [tankX, lineY], pc = [330, lineY + 70], p1 = [missX, missY];
+    return [
+      (1 - t) ** 2 * p0[0] + 2 * (1 - t) * t * pc[0] + t ** 2 * p1[0],
+      (1 - t) ** 2 * p0[1] + 2 * (1 - t) * t * pc[1] + t ** 2 * p1[1],
+    ];
+  };
+  const path = Array.from({ length: 25 }, (_, i) => bez(i / 24));
+  const d = path.map((p, i) => `${i === 0 ? "M" : "L"} ${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" ");
+  const windArrows = [0.15, 0.32, 0.5, 0.68, 0.85].map((t) => bez(t));
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Crosswind pushes the round perpendicular to the line of fire, causing it to land outside the target." style={{ display: "block" }}>
-      <line x1={40} y1={lineY} x2={560} y2={lineY} stroke={PAL.mono === PAL.mono ? PAL.text2 : PAL.text2} strokeWidth={1.5} strokeDasharray="6 6" opacity={0.7} />
-      <text x={300} y={lineY - 10} textAnchor="middle" fontSize={11} fill={PAL.text2}>Line of fire</text>
-      <path d={`M 60 ${lineY} Q 320 ${lineY} 520 ${lineY - 55}`} fill="none" stroke={PAL.terra} strokeWidth={2.5} />
-      <rect x={40} y={lineY - 8} width={24} height={16} rx={2} fill={PAL.text} />
-      <rect x={505} y={lineY - 26} width={2.3 * 9} height={2.3 * 9} fill="none" stroke={PAL.text} strokeWidth={2} />
-      <text x={520} y={lineY - 34} textAnchor="middle" fontSize={10} fill={PAL.text2}>Target</text>
-      <Arrow x1={300} y1={lineY - 55} x2={300} y2={lineY - 5} color={PAL.terraBright} width={3} />
-      <text x={315} y={lineY - 30} fontSize={12} fontWeight={700} fill={PAL.terraBright}>Crosswind</text>
-      <line x1={490} y1={lineY - 50} x2={505} y2={lineY - 40} stroke={PAL.terraBright} strokeWidth={2} />
-      <text x={470} y={lineY - 62} fontSize={11} fontWeight={700} fill={PAL.terraBright}>Miss</text>
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Top-down view: crosswind pushes the round away from the straight line of fire, causing it to land short of and above the target." style={{ display: "block" }}>
+      <text x={W / 2} y={18} textAnchor="middle" fontSize={11.5} fontWeight={700} fill={PAL.text2} style={{ textTransform: "uppercase", letterSpacing: 1 }}>
+        Top-Down View
+      </text>
+
+      {/* line of fire, kept clear above the trajectory */}
+      <line x1={tankX + 6} y1={lineY} x2={targetX - 20} y2={lineY} stroke={PAL.text2} strokeWidth={1.5} strokeDasharray="7 6" opacity={0.8} />
+      <text x={(tankX + targetX) / 2} y={lineY - 10} textAnchor="middle" fontSize={10.5} fill={PAL.text2}>Line of Fire</text>
+
+      {/* deflected trajectory */}
+      <path d={d} fill="none" stroke={PAL.terraBright} strokeWidth={2.5} />
+
+      {/* distributed crosswind arrows along the trajectory, pointing up */}
+      {windArrows.map((p, i) => (
+        <Arrow key={i} x1={p[0]} y1={p[1] + 16} x2={p[0]} y2={p[1] - 2} color={PAL.wind} width={2.4} />
+      ))}
+      <text x={windArrows[2][0]} y={windArrows[2][1] + 34} textAnchor="middle" fontSize={10.5} fontWeight={700} fill={PAL.windLineC}>Crosswind</text>
+
+      {/* tank */}
+      <rect x={tankX - 14} y={lineY - 7} width={26} height={14} rx={2} fill={PAL.text} />
+      <text x={tankX} y={lineY + 30} textAnchor="middle" fontSize={10} fill={PAL.text2}>Tank</text>
+
+      {/* target */}
+      <line x1={targetX - 24} y1={lineY} x2={targetX + 24} y2={lineY} stroke={PAL.text2} strokeWidth={1} opacity={0.7} />
+      <line x1={targetX} y1={lineY - 24} x2={targetX} y2={lineY + 24} stroke={PAL.text2} strokeWidth={1} opacity={0.7} />
+      <rect x={targetX - 18} y={lineY - 18} width={36} height={36} fill="none" stroke={PAL.text} strokeWidth={2} />
+      <text x={targetX} y={lineY + 40} textAnchor="middle" fontSize={10} fill={PAL.text2}>Target</text>
+
+      {/* miss mark */}
+      <line x1={missX - 8} y1={missY - 8} x2={missX + 8} y2={missY + 8} stroke={PAL.terraBright} strokeWidth={2.5} />
+      <line x1={missX + 8} y1={missY - 8} x2={missX - 8} y2={missY + 8} stroke={PAL.terraBright} strokeWidth={2.5} />
+      <text x={missX} y={missY - 16} textAnchor="middle" fontSize={11} fontWeight={700} fill={PAL.terraBright}>Miss</text>
     </svg>
   );
 }
+
 function Screen1({ onNext }) {
   return (
     <section>
-      <h2 style={hStyle}>Ballistic simulations background</h2>
-      <p style={leadStyle}>
+      <h2 style={hStyle}>Ballistic Simulations Background</h2>
+      <p style={sectionLead}>
         Before HASRD, a quick tour of how ballistic simulation works — and
         where wind sneaks in as a source of error.
       </p>
 
       <div style={panelCard}>
-        <h3 style={h3Style}>Trajectories follow Newton's second law</h3>
+        <h3 style={h3Style}>Trajectories Follow Newton's Second Law</h3>
         <p style={pStyle}>
           At its core, a ballistic model is a basic physics problem: apply
           Newton's second law to a projectile under gravity, drag, and
@@ -421,17 +487,20 @@ function Screen1({ onNext }) {
       </div>
 
       <div style={panelCard}>
-        <h3 style={h3Style}>The model runs on a set of initial conditions</h3>
+        <h3 style={h3Style}>The Model Runs on a Set of Initial Conditions</h3>
         <p style={pStyle}>
           Real simulations take in atmospheric conditions, ballistic
           properties of the round, and the range to target, then produce
           outputs like super elevation and time of flight.
         </p>
+        <p style={capStyle}>
+          <strong>Super elevation</strong> — the angle at which the round hits the target.
+        </p>
         <FlowDiagram mode="ideal" />
       </div>
 
       <div style={panelCard}>
-        <h3 style={h3Style}>The real world isn't ideal</h3>
+        <h3 style={h3Style}>The Real World Isn't Ideal</h3>
         <p style={pStyle}>
           Every one of those inputs carries measurement error and
           assumptions. Add an error budget to the ideal picture and a round
@@ -443,7 +512,7 @@ function Screen1({ onNext }) {
       </div>
 
       <div style={panelCard}>
-        <h3 style={h3Style}>One of those errors: crosswind drift</h3>
+        <h3 style={h3Style}>One of Those Errors: Crosswind Drift</h3>
         <p style={pStyle}>
           The component of wind perpendicular to the line of fire pushes the
           round sideways and can turn a hit into a miss. At certain ranges,
@@ -461,29 +530,31 @@ function Screen1({ onNext }) {
 }
 
 // ---------------------------------------------------------------------------
-// PAGE 2 — Wind background
+// PAGE 2 — Wind Background
 // ---------------------------------------------------------------------------
 const LEGACY_CONDITIONS = [
-  { key: "calm", label: "Calm day", sigma: 1.0 },
-  { key: "proving", label: "Proving grounds", sigma: 1.9 },
-  { key: "combat", label: "Quasi combat", sigma: 3.35 },
+  { key: "calm", label: "Calm Day", sigma: 1.0, color: PAL.legacyShades[0] },
+  { key: "proving", label: "Proving Grounds", sigma: 1.9, color: PAL.legacyShades[1] },
+  { key: "combat", label: "Quasi Combat", sigma: 3.35, color: PAL.legacyShades[2] },
 ];
 function GaussianBars({ sigma, color = PAL.terra }) {
-  const W = 340, H = 170, midX = W / 2, base = H - 22, maxH = 120;
+  const W = 340, H = 190, midX = W / 2, base = H - 26, maxH = 118;
   const bars = [];
-  const nb = 17, span = 9; // -9..9 sd-scaled range
+  const nb = 17, span = 9;
   for (let i = 0; i < nb; i++) {
     const v = -span + (2 * span * i) / (nb - 1);
     const dens = Math.exp(-(v * v) / (2 * sigma * sigma)) / (sigma * Math.sqrt(2 * Math.PI));
     const h = Math.min(maxH, dens * sigma * 2.6 * maxH);
     const x = midX + (v / span) * (W / 2 - 20) - (W / (nb * 2.6));
-    bars.push(<rect key={i} x={x} y={base - h} width={W / (nb * 1.3)} height={h} fill={color} opacity={0.75} />);
+    bars.push(<rect key={i} x={x} y={base - h} width={W / (nb * 1.3)} height={h} fill={color} opacity={0.85} />);
   }
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={`Bell-shaped histogram of crosswind speed, mean 0, standard deviation ${sigma} metres per second.`} style={{ display: "block" }}>
+      <text x={midX} y={16} textAnchor="middle" fontSize={12} fontWeight={700} fill={PAL.text}>Legacy Wind Model</text>
+      <text x={midX} y={30} textAnchor="middle" fontSize={11} fill={PAL.text2}>μ = 0, σ = {sigma.toFixed(2)} m/s</text>
       <line x1={20} y1={base} x2={W - 20} y2={base} stroke={PAL.text2} strokeWidth={1} />
       {bars}
-      <text x={midX} y={base + 16} textAnchor="middle" fontSize={10} fill={PAL.text2}>Wind speed (m/s)</text>
+      <text x={midX} y={base + 18} textAnchor="middle" fontSize={10} fill={PAL.text2}>Wind Speed (m/s)</text>
     </svg>
   );
 }
@@ -491,78 +562,81 @@ function LegacyPanel() {
   const [cond, setCond] = useState(LEGACY_CONDITIONS[0]);
   return (
     <div style={panelHalf}>
-      <h3 style={h3Style}>Legacy description of wind</h3>
+      <h3 style={h3Style}>Legacy Description of Wind</h3>
       <p style={pStyle}>
         Legacy ballistic models typically treat crosswind as an average or
         constant speed, normally distributed with mean 0 and a standard
-        deviation set by the firing condition:
+        deviation set by the firing condition.
       </p>
-      <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "nowrap" }}>
         {LEGACY_CONDITIONS.map((c) => (
           <button
             key={c.key}
             onClick={() => setCond(c)}
             style={{
-              ...btnGhost,
-              padding: "6px 12px",
-              fontSize: 12.5,
-              background: cond.key === c.key ? PAL.legacy : "transparent",
-              color: cond.key === c.key ? "#fff" : PAL.text2,
-              borderColor: "rgba(110,106,87,0.4)",
+              ...btnBase,
+              flex: 1,
+              padding: "7px 6px",
+              fontSize: 11.5,
+              background: c.color,
+              color: PAL.text,
+              border: cond.key === c.key ? `2px solid ${PAL.text}` : "2px solid transparent",
             }}
           >
-            {c.label} · σ {c.sigma}
+            {c.label}
           </button>
         ))}
       </div>
-      <GaussianBars sigma={cond.sigma} color={PAL.legacy} />
-      <p style={capStyle}>
-        μ = 0, σ = {cond.sigma.toFixed(2)} m/s — the same distribution is
-        assumed regardless of what the round flies over.
-      </p>
+      <GaussianBars sigma={cond.sigma} color={cond.color} />
     </div>
   );
 }
 
-function MeanWindChart({ terrain }) {
+function MeanWindChart() {
+  // representative y = a*x^3 (x>=0), 0 otherwise — a differs by roughness
   const W = 320, H = 220, baseX = 46, baseY = 190, topY = 20;
   const curves = [
-    { z0: 3.0, color: PAL.forest, label: "Rough (z0=3.0)" },
-    { z0: 0.15, color: PAL.bushes, label: "Mid (z0=0.15)" },
-    { z0: 0.001, color: PAL.grass, label: "Smooth (z0≈0)" },
+    { a: 1.0, color: PAL.windLineA, dash: undefined, label: "Grassy Field" },
+    { a: 0.55, color: PAL.windLineB, dash: "6 4", label: "Bushes" },
+    { a: 0.22, color: PAL.windLineC, dash: "2 4", label: "Forest" },
   ];
-  const pathFor = (z0) => {
+  const pathFor = (a) => {
     const pts = [];
-    for (let i = 0; i <= 24; i++) {
-      const f = i / 24;
-      const h = f * 100;
-      const shape = Math.pow(f, 0.5 + z0 * 0.9);
-      const x = baseX + shape * (W - baseX - 20);
-      const y = baseY - f * (baseY - topY);
+    for (let i = 0; i <= 30; i++) {
+      const f = i / 30; // normalized wind speed axis (x)
+      const height = a * Math.pow(f, 3); // normalized height (y), cubic growth
+      const x = baseX + f * (W - baseX - 20);
+      const y = baseY - Math.min(1, height) * (baseY - topY);
       pts.push(`${i === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`);
     }
     return pts.join(" ");
   };
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Mean wind speed grows with height, faster over smooth terrain and slower over rough terrain." style={{ display: "block" }}>
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Mean wind speed grows with height as a cubic function, fastest over smooth terrain and slowest over rough terrain." style={{ display: "block" }}>
       <line x1={baseX} y1={topY} x2={baseX} y2={baseY} stroke={PAL.text2} strokeWidth={1} />
       <line x1={baseX} y1={baseY} x2={W - 16} y2={baseY} stroke={PAL.text2} strokeWidth={1} />
       <text x={8} y={(topY + baseY) / 2} fontSize={9.5} fill={PAL.text2} transform={`rotate(-90 8 ${(topY + baseY) / 2})`} textAnchor="middle">Height</text>
-      <text x={(baseX + W - 16) / 2} y={H - 4} fontSize={9.5} fill={PAL.text2} textAnchor="middle">Wind speed</text>
+      <text x={(baseX + W - 16) / 2} y={H - 26} fontSize={9.5} fill={PAL.text2} textAnchor="middle">Wind Speed</text>
       {curves.map((c) => (
-        <path key={c.z0} d={pathFor(c.z0)} fill="none" stroke={c.color} strokeWidth={2.2} />
+        <path key={c.label} d={pathFor(c.a)} fill="none" stroke={c.color} strokeWidth={2.4} strokeDasharray={c.dash} />
       ))}
-      <Arrow x1={W - 40} y1={baseY - 14} x2={baseX + 30} y2={baseY - 14} color={PAL.text2} width={1.5} />
-      <text x={(W - 40 + baseX + 30) / 2} y={baseY - 20} fontSize={9} fill={PAL.text2} textAnchor="middle">Increasing surface roughness</text>
+      <g transform={`translate(${baseX + 10}, ${topY + 8})`}>
+        {curves.map((c, i) => (
+          <g key={c.label} transform={`translate(0, ${i * 14})`}>
+            <line x1={0} y1={0} x2={16} y2={0} stroke={c.color} strokeWidth={2.4} strokeDasharray={c.dash} />
+            <text x={20} y={3} fontSize={9} fill={PAL.text2}>{c.label}</text>
+          </g>
+        ))}
+      </g>
     </svg>
   );
 }
 function TurbulenceSquiggle() {
   const W = 320, H = 150;
   const rows = [
-    { color: PAL.terra, seed: 1 },
-    { color: PAL.hasrd, seed: 2 },
-    { color: PAL.legacy, seed: 3 },
+    { color: PAL.turbulence, seed: 1, opacity: 0.9 },
+    { color: PAL.turbulenceDeep, seed: 2, opacity: 0.6 },
+    { color: PAL.turbulence, seed: 3, opacity: 0.5 },
   ];
   const pathFor = (seed) => {
     let pts = [];
@@ -582,14 +656,13 @@ function TurbulenceSquiggle() {
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Noisy turbulence signal fluctuating around the mean wind." style={{ display: "block" }}>
       {rows.map((r) => (
-        <path key={r.seed} d={pathFor(r.seed)} fill="none" stroke={r.color} strokeWidth={1.4} opacity={0.75} />
+        <path key={r.seed} d={pathFor(r.seed)} fill="none" stroke={r.color} strokeWidth={1.5} opacity={r.opacity} />
       ))}
       <line x1={0} y1={H / 2} x2={W} y2={H / 2} stroke={PAL.text2} strokeDasharray="3 4" strokeWidth={1} opacity={0.5} />
     </svg>
   );
 }
 function LandCoverMosaic() {
-  // stylized, original mosaic (not a reproduction of any satellite image)
   const cells = [];
   let s = 42;
   const rnd = () => {
@@ -615,45 +688,41 @@ function LiteraturePanel() {
   const [open, setOpen] = useState(false);
   return (
     <div style={panelHalf}>
-      <h3 style={h3Style}>Literature-informed wind profiles</h3>
-      <ul style={ulStyle}>
-        <li>Wind can be thought of as having two components: a DC signal and noise.</li>
-        <li>
-          The literature shows the "average wind" — the DC signal — is a
-          function of height and{" "}
-          <button
-            onClick={() => setOpen((o) => !o)}
-            style={{ ...inlineInfoBtn }}
-            aria-expanded={open}
-          >
-            surface roughness
-          </button>{" "}
-          (the terrain and vegetation below).
-        </li>
-        {open && (
-          <li style={{ listStyle: "none", marginLeft: -20 }}>
-            <div style={{ background: "#fff", border: "1px solid rgba(110,106,87,0.3)", borderRadius: 4, padding: 10, marginTop: 4 }}>
+      <h3 style={h3Style}>Literature-Informed Wind Profiles</h3>
+      <p style={pStyle}>
+        Wind can be thought of as having two components: a DC signal and
+        noise. Together, they capture both the average push on a round and
+        the small, rapid fluctuations around it.
+      </p>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textAlign: "center", color: PAL.text2, marginBottom: 4 }}>DC Signal</div>
+          <MeanWindChart />
+          <p style={capStyle}>
+            The literature shows the "average wind" — the DC signal — is a
+            function of height and{" "}
+            <button onClick={() => setOpen((o) => !o)} style={inlineInfoBtn} aria-expanded={open}>
+              surface roughness
+            </button>{" "}
+            (the terrain and vegetation below).
+          </p>
+          {open && (
+            <div style={{ background: "#fff", border: "1px solid rgba(59,46,34,0.18)", borderRadius: 4, padding: 10, marginTop: 6 }}>
               <LandCoverMosaic />
               <p style={{ ...capStyle, marginTop: 6 }}>
                 Surface roughness is estimable nearly everywhere via satellite
                 imagery of ground cover.
               </p>
             </div>
-          </li>
-        )}
-        <li>The literature also has well-developed methods to estimate wind turbulence.</li>
-      </ul>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <div style={{ flex: 1, minWidth: 180 }}>
-          <MeanWindChart />
+          )}
         </div>
         <div style={{ flex: 1, minWidth: 180 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textAlign: "center", color: PAL.text2, marginBottom: 4 }}>Noise</div>
           <TurbulenceSquiggle />
+          <p style={capStyle}>
+            The literature also has well-developed methods to estimate wind turbulence.
+          </p>
         </div>
-      </div>
-      <div style={{ display: "flex", justifyContent: "space-around", fontSize: 11, fontWeight: 700, color: PAL.text2 }}>
-        <span>DC signal</span>
-        <span>Noise</span>
       </div>
     </div>
   );
@@ -672,7 +741,7 @@ function Screen2({ terrain, setTerrain, onNext, onBack }) {
       const L = (14 + 70 * heightF) * tScale;
       if (L < 4) return;
       profile.push(
-        <Arrow key={`p${ci}-${ri}`} x1={cx - L / 2} y1={ry} x2={cx + L / 2} y2={ry - 4 * heightF} color={PAL.hasrd} width={2} opacity={0.5} />
+        <Arrow key={`p${ci}-${ri}`} x1={cx - L / 2} y1={ry} x2={cx + L / 2} y2={ry - 4 * heightF} color={PAL.wind} width={2} opacity={0.7} />
       );
     })
   );
@@ -719,9 +788,7 @@ function Screen2({ terrain, setTerrain, onNext, onBack }) {
     },
     [W]
   );
-  const endDrag = useCallback(() => {
-    dragId.current = null;
-  }, []);
+  const endDrag = useCallback(() => { dragId.current = null; }, []);
   useEffect(() => {
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", endDrag);
@@ -733,8 +800,8 @@ function Screen2({ terrain, setTerrain, onNext, onBack }) {
 
   return (
     <section>
-      <h2 style={hStyle}>Wind background</h2>
-      <p style={leadStyle}>
+      <h2 style={hStyle}>Wind Background</h2>
+      <p style={sectionLead}>
         Two ways to describe the same crosswind: the fixed number legacy
         models use, and the height- and terrain-aware profile the literature
         actually supports.
@@ -746,7 +813,7 @@ function Screen2({ terrain, setTerrain, onNext, onBack }) {
       </div>
 
       <div style={{ ...panelCard, marginTop: 20 }}>
-        <h3 style={h3Style}>Wind speed increases with height and with smoothness</h3>
+        <h3 style={h3Style}>Wind Speed Increases With Height but Decreases With Roughness</h3>
         <p style={pStyle}>
           Drag the points along the trajectory, and use the slider below, to
           see how surface roughness and height change wind speed.
@@ -756,13 +823,18 @@ function Screen2({ terrain, setTerrain, onNext, onBack }) {
           viewBox={`0 0 ${W} ${H}`}
           width="100%"
           role="img"
-          aria-label="Side view: wind arrows lengthen with height while draggable points along the shell's arc show wind speed at muzzle, apex, and descent."
+          aria-label="Side view: a tank fires toward a target while wind arrows lengthen with height; draggable points along the shell's arc show wind speed at muzzle, apex, and descent."
           style={{ display: "block", touchAction: "none" }}
         >
           <rect x={0} y={0} width={W} height={groundY} fill="rgba(255,255,255,0.35)" />
           <rect x={0} y={groundY} width={W} height={H - groundY} fill={terrainColor(terrain)} />
           {profile}
           <path d={`M ${P0[0]} ${P0[1]} Q ${Pc[0]} ${Pc[1]} ${P2[0]} ${P2[1]}`} fill="none" stroke={PAL.terra} strokeWidth={2.5} strokeDasharray="2 5" strokeLinecap="round" />
+
+          <rect x={P0[0] - 26} y={P0[1] - 14} width={28} height={14} rx={2} fill={PAL.text} />
+          <text x={P0[0] - 12} y={P0[1] + 30} textAnchor="middle" fontSize={10} fill="rgba(46,44,34,0.75)">Tank</text>
+          <rect x={P2[0] - 6} y={P2[1] - 18} width={2.3 * 8} height={2.3 * 8} fill="none" stroke={PAL.terra} strokeWidth={2} />
+          <text x={P2[0] + 12} y={P2[1] + 30} textAnchor="middle" fontSize={10} fill="rgba(46,44,34,0.75)">Target</text>
 
           {pts.map((p) => {
             const [px, py] = bez(p.t);
@@ -809,7 +881,7 @@ function Screen2({ terrain, setTerrain, onNext, onBack }) {
 }
 
 // ---------------------------------------------------------------------------
-// PAGE 3 — HASRD wind stratification (new)
+// PAGE 3 — HASRD Wind Stratification
 // ---------------------------------------------------------------------------
 function GroundBand({ y, h }) {
   const regions = [
@@ -826,10 +898,10 @@ function GroundBand({ y, h }) {
   );
 }
 function TerrainWindCompare({ kind }) {
-  const W = 360, H = 290, groundY = 232, groundH = 58;
+  const W = 360, H = 260, groundY = 202, groundH = 58;
   const isLegacy = kind === "legacy";
-  const color = isLegacy ? PAL.legacy : PAL.hasrd;
-  const heights = [205, 160, 112, 62];
+  const color = isLegacy ? PAL.legacy : PAL.wind;
+  const heights = [175, 132, 88, 44];
   const regionFactor = [1, 0.66, 0.18];
   const regionCx = [60, 180, 300];
   const arrows = [];
@@ -843,14 +915,14 @@ function TerrainWindCompare({ kind }) {
     );
   } else {
     regionCx.forEach((cx, ri) => {
-      heights.forEach((hy, hi) => {
+      heights.forEach((hy) => {
         const heightF = (groundY - hy) / (groundY - heights[3]);
         const L = (10 + 46 * heightF) * regionFactor[ri];
         if (L < 3) return;
-        arrows.push(<Arrow key={`h${ri}-${hi}`} x1={cx - L / 2} y1={hy} x2={cx + L / 2} y2={hy - 5 * heightF} color={color} width={2} />);
+        arrows.push(<Arrow key={`h${ri}-${hy}`} x1={cx - L / 2} y1={hy} x2={cx + L / 2} y2={hy - 5 * heightF} color={color} width={2} />);
       });
       const sr = 5 + 7 * regionFactor[ri];
-      arrows.push(<Swirl key={`sw${ri}`} cx={cx} cy={groundY - 14} r={sr} color={color} />);
+      arrows.push(<Swirl key={`sw${ri}`} cx={cx} cy={groundY - 16} r={sr} color={PAL.turbulence} />);
     });
   }
   return (
@@ -858,7 +930,7 @@ function TerrainWindCompare({ kind }) {
       <rect x={0} y={0} width={W} height={groundY} fill="rgba(255,255,255,0.35)" />
       <GroundBand y={groundY} h={groundH} />
       {arrows}
-      {["Grassy field", "Bushes", "Forest"].map((t, i) => (
+      {["Grassy Field", "Bushes", "Forest"].map((t, i) => (
         <text key={t} x={60 + i * 120} y={groundY + groundH - 8} textAnchor="middle" fontSize={11} fill="rgba(242,235,216,0.9)">
           {t}
         </text>
@@ -869,51 +941,43 @@ function TerrainWindCompare({ kind }) {
 function Screen3({ onNext, onBack }) {
   return (
     <section>
-      <h2 style={hStyle}>HASRD wind stratification</h2>
-      <p style={leadStyle}>
+      <h2 style={hStyle}>HASRD Wind Stratification</h2>
+      <p style={sectionLead}>
         The thesis contribution: combine the two pieces above into one model
         that actually knows what it's flying over.
       </p>
 
       <div style={{ ...panelCard, borderColor: PAL.terra, borderWidth: 2, borderStyle: "solid" }}>
-        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.6, textTransform: "uppercase", color: PAL.terra, marginBottom: 8 }}>
-          What makes this special
+        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.6, textTransform: "uppercase", color: PAL.terra, marginBottom: 10 }}>
+          What Makes This Special
         </div>
-        <ol style={{ ...ulStyle, paddingLeft: 20 }}>
-          <li>
-            Combine the mathematical representations of height-dependent and
-            surface-roughness-dependent wind speed into a single{" "}
-            <strong>Height And Surface Roughness Dependent</strong> windspeed
-            model.
-          </li>
-          <li>Layer turbulence on top of that mean profile.</li>
-          <li style={{ color: PAL.text2, fontStyle: "italic" }}>
-            That's the whole trick.
-          </li>
-          <li>
-            In simulation, this means using{" "}
-            <strong>
-              global land cover data sets to obtain surface roughness and
-              update the mean wind and turbulence signal along the
-              trajectory
-            </strong>
-            .
-          </li>
-        </ol>
+        <p style={{ ...pStyle, fontWeight: 600 }}>
+          A single mathematical model combines height-dependent and
+          surface-roughness-dependent wind speed — a Height And Surface
+          Roughness Dependent windspeed — and layers turbulence on top of it.
+        </p>
+        <p style={pStyle}>
+          In simulation, that means using{" "}
+          <strong>
+            global land cover data sets to obtain surface roughness and
+            update the mean wind and turbulence signal along the trajectory
+          </strong>
+          .
+        </p>
       </div>
 
-      <div className="panels" style={{ display: "flex", gap: 20, marginTop: 20 }}>
-        <figure style={panelCard}>
+      <div className="panels" style={{ display: "flex", gap: 20, marginTop: 20, alignItems: "stretch" }}>
+        <figure style={{ ...panelCard, margin: 0, flex: 1, display: "flex", flexDirection: "column" }}>
           <TerrainWindCompare kind="legacy" />
-          <figcaption style={capStyle}>
+          <figcaption style={{ ...capStyle, minHeight: 44, marginTop: 8 }}>
             <strong style={{ color: PAL.text }}>Legacy.</strong> The same wind
             everywhere — blind to the ground below.
           </figcaption>
         </figure>
-        <figure style={panelCard}>
+        <figure style={{ ...panelCard, margin: 0, flex: 1, display: "flex", flexDirection: "column" }}>
           <TerrainWindCompare kind="hasrd" />
-          <figcaption style={capStyle}>
-            <strong style={{ color: PAL.hasrd }}>HASRD.</strong> Wind grows
+          <figcaption style={{ ...capStyle, minHeight: 44, marginTop: 8 }}>
+            <strong style={{ color: PAL.windLineC }}>HASRD.</strong> Wind grows
             with height, shrinks over rougher ground, plus turbulence.
           </figcaption>
         </figure>
@@ -924,13 +988,13 @@ function Screen3({ onNext, onBack }) {
 }
 
 // ---------------------------------------------------------------------------
-// PAGE 4 — Shooting gallery
+// PAGE 4 — Shooting Gallery
 // ---------------------------------------------------------------------------
 const VW = 760, VH = 430;
 const TARGET = { x: 596, y: 215 };
 const SCALE = 9;
 
-function Scatter({ pts, color, r = 1.15, opacity = 0.55 }) {
+function Scatter({ pts, color, r = 1.15, opacity = 0.6 }) {
   return (
     <g>
       {pts.map((p, i) => (
@@ -943,7 +1007,7 @@ function Ellipse2sig({ sigma, R, color }) {
   const sy = Math.sqrt(Math.pow(sigma * A * rangeDrift(R), 2) + Math.pow(SB * rangeBase(R), 2));
   const sx = SB * rangeBase(R);
   return (
-    <ellipse cx={TARGET.x} cy={TARGET.y} rx={Math.max(2, 2 * sx * SCALE)} ry={Math.max(2, 2 * sy * SCALE)} fill="none" stroke={color} strokeWidth={1.6} strokeDasharray="4 4" opacity={0.9} />
+    <ellipse cx={TARGET.x} cy={TARGET.y} rx={Math.max(2, 2 * sx * SCALE)} ry={Math.max(2, 2 * sy * SCALE)} fill="none" stroke={color} strokeWidth={1.8} strokeDasharray="4 4" opacity={0.95} />
   );
 }
 function Screen4({ terrain, setTerrain, onBack }) {
@@ -970,28 +1034,16 @@ function Screen4({ terrain, setTerrain, onBack }) {
     return out;
   }, [volleySeed, sigma, range, compare]);
 
-  const clearShots = () => {
-    setSingles([]);
-    setVolleySeed(null);
-  };
-  const onTerrain = (v) => {
-    setTerrain(v);
-    setSingles([]);
-  };
-  const onRange = (v) => {
-    setRange(v);
-    setSingles([]);
-  };
+  const clearShots = () => { setSingles([]); setVolleySeed(null); };
+  const onTerrain = (v) => { setTerrain(v); setSingles([]); };
+  const onRange = (v) => { setRange(v); setSingles([]); };
 
   const fireOne = useCallback(() => {
     const [x, y] = impact(sigma, range, gauss);
     const tx = TARGET.x + x * SCALE;
     const ty = TARGET.y - y * SCALE;
     const land = () => setSingles((s) => [...s.slice(-40), [x, y]]);
-    if (reduceMotion()) {
-      land();
-      return;
-    }
+    if (reduceMotion()) { land(); return; }
     const start = performance.now();
     const x0 = 86, y0 = TARGET.y;
     const dur = 520;
@@ -1000,10 +1052,7 @@ function Screen4({ terrain, setTerrain, onBack }) {
       const e = 1 - Math.pow(1 - k, 2);
       setProj({ cx: x0 + (tx - x0) * e, cy: y0 + (ty - y0) * e });
       if (k < 1) rafRef.current = requestAnimationFrame(tick);
-      else {
-        setProj(null);
-        land();
-      }
+      else { setProj(null); land(); }
     };
     cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(tick);
@@ -1011,8 +1060,6 @@ function Screen4({ terrain, setTerrain, onBack }) {
 
   useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
 
-  // wind vector triangle — origin, with a minimum visual separation so the
-  // total-wind and range legs stay legible even at low crosswind sigma
   const O = { x: 96, y: 158 };
   const rangeLeg = 90;
   const crossLeg = 18 + sigma * 12;
@@ -1024,11 +1071,11 @@ function Screen4({ terrain, setTerrain, onBack }) {
 
   return (
     <section>
-      <button onClick={onBack} style={backLink}>← back to how it works</button>
-      <h2 style={hStyle}>Shooting gallery</h2>
-      <p style={{ ...leadStyle, textAlign: "center", margin: "0 auto 14px" }}>
+      <button onClick={onBack} style={backLink}>← Back to How It Works</button>
+      <h2 style={hStyle}>Shooting Gallery</h2>
+      <p style={sectionLead}>
         Fire downrange and watch where the rounds land. Then flip on{" "}
-        <em>Compare legacy</em>, drag the terrain, and push the range out to
+        <em>Compare Legacy</em>, drag the terrain, and push the range out to
         3000 m.
       </p>
 
@@ -1049,13 +1096,13 @@ function Screen4({ terrain, setTerrain, onBack }) {
               <text x={79} y={TARGET.y + 30} textAnchor="middle" fontSize={10} fontFamily="monospace" fill={PAL.mono}>Shooter</text>
             </g>
 
-            {volley && compare && <Ellipse2sig sigma={LEGACY_SIGMA} R={range} color={PAL.legacy} />}
-            {volley && <Ellipse2sig sigma={sigma} R={range} color={PAL.terra} />}
-            {volley && compare && <Scatter pts={volley.legacy} color={PAL.legacy} opacity={0.5} />}
-            {volley && <Scatter pts={volley.hasrd} color={PAL.terra} opacity={0.6} />}
+            {volley && compare && <Ellipse2sig sigma={LEGACY_SIGMA} R={range} color={PAL.legacyPop} />}
+            {volley && <Ellipse2sig sigma={sigma} R={range} color={PAL.terraBright} />}
+            {volley && compare && <Scatter pts={volley.legacy} color={PAL.legacyPop} opacity={0.55} />}
+            {volley && <Scatter pts={volley.hasrd} color={PAL.terraBright} opacity={0.7} />}
 
             {singles.map((p, i) => (
-              <circle key={i} cx={TARGET.x + p[0] * SCALE} cy={TARGET.y - p[1] * SCALE} r={2.6} fill={PAL.terraBright} />
+              <circle key={i} cx={TARGET.x + p[0] * SCALE} cy={TARGET.y - p[1] * SCALE} r={2.8} fill={PAL.terraBright} />
             ))}
             {proj && <circle cx={proj.cx} cy={proj.cy} r={3.2} fill={PAL.terraBright} />}
 
@@ -1063,59 +1110,61 @@ function Screen4({ terrain, setTerrain, onBack }) {
               <line x1={TARGET.x - 26} y1={TARGET.y} x2={TARGET.x + 26} y2={TARGET.y} stroke={PAL.mono} strokeWidth={1} opacity={0.7} />
               <line x1={TARGET.x} y1={TARGET.y - 26} x2={TARGET.x} y2={TARGET.y + 26} stroke={PAL.mono} strokeWidth={1} opacity={0.7} />
               <rect x={TARGET.x - HALF * SCALE} y={TARGET.y - HALF * SCALE} width={2 * HALF * SCALE} height={2 * HALF * SCALE} fill="none" stroke={PAL.mono} strokeWidth={1.6} />
-              <text x={TARGET.x} y={TARGET.y - HALF * SCALE - 7} textAnchor="middle" fontSize={10} fontFamily="monospace" fill={PAL.mono}>2.3 m target</text>
+              <text x={TARGET.x} y={TARGET.y - HALF * SCALE - 7} textAnchor="middle" fontSize={10} fontFamily="monospace" fill={PAL.mono}>2.3 m Target</text>
             </g>
 
             <g>
-              <line x1={O.x} y1={O.y} x2={O.x + rangeLeg} y2={O.y} stroke={PAL.legacy} strokeWidth={2} strokeDasharray="4 4" />
-              <text x={O.x + rangeLeg / 2} y={O.y + 16} textAnchor="middle" fontSize={10} fontFamily="monospace" fill={PAL.legacy}>Range</text>
+              <line x1={O.x} y1={O.y} x2={O.x + rangeLeg} y2={O.y} stroke={PAL.legacyPop} strokeWidth={2.2} strokeDasharray="4 4" />
+              <text x={O.x + rangeLeg / 2} y={O.y + 16} textAnchor="middle" fontSize={10} fontFamily="monospace" fill={PAL.legacyPop}>Range</text>
               <Arrow x1={tip.x} y1={O.y} x2={tip.x} y2={tip.y} color={PAL.terraBright} width={3} />
               <text x={tip.x + 8} y={(O.y + tip.y) / 2} fontSize={10} fontFamily="monospace" fill={PAL.terraBright}>Crosswind</text>
-              <Arrow x1={O.x} y1={O.y} x2={tip.x} y2={tip.y} color={PAL.hasrd} width={2.5} />
-              <text x={O.x - 4} y={O.y + 16} fontSize={10} fontFamily="monospace" fill={PAL.hasrd} textAnchor="end">Total wind</text>
-              <Swirl cx={tip.x + 4} cy={tip.y - 4} r={7} color={PAL.hasrd} />
+              <Arrow x1={O.x} y1={O.y} x2={tip.x} y2={tip.y} color={PAL.windPop} width={2.6} />
+              <text x={O.x - 4} y={O.y + 16} fontSize={10} fontFamily="monospace" fill={PAL.windPop} textAnchor="end">Total Wind</text>
+              <Swirl cx={tip.x + 4} cy={tip.y - 4} r={7} color={PAL.turbulence} />
             </g>
 
             <g fontFamily="monospace" fill={PAL.mono} fontSize={12}>
               <text x={VW - 24} y={36} textAnchor="end">RANGE  {range} m</text>
               <text x={VW - 24} y={54} textAnchor="end">TERRAIN  {terrainName(terrain)}</text>
-              <text x={VW - 24} y={72} textAnchor="end">CROSSWIND  {sigma.toFixed(2)} m/s</text>
-              <text x={VW - 24} y={90} textAnchor="end" fill={PAL.terra}>P_HIT  {fmtPct(hasrdHit)} %</text>
+              <text x={VW - 24} y={72} textAnchor="end">CROSSWIND  σ = {sigma.toFixed(2)} m/s</text>
+              <text x={VW - 24} y={90} textAnchor="end" fill={PAL.terraBright}>P_HIT  {fmtPct(hasrdHit)} %</text>
             </g>
           </g>
         </svg>
       </div>
 
-      <div className="gallery" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginTop: 18 }}>
-        <div>
-          <TerrainSlider terrain={terrain} setTerrain={onTerrain} />
-          <div style={{ marginTop: 14 }}>
-            <label htmlFor="range" style={sliderLabel}>
-              Range <span style={{ color: PAL.text2 }}>{range} m</span>
+      <div style={{ ...panelCard, marginTop: 18, marginBottom: 0 }}>
+        <div className="gallery" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+          <div>
+            <TerrainSlider terrain={terrain} setTerrain={onTerrain} />
+            <div style={{ marginTop: 14 }}>
+              <label htmlFor="range" style={sliderLabel}>
+                Range <span style={{ color: PAL.text2 }}>{range} m</span>
+              </label>
+              <input id="range" type="range" min={300} max={3000} step={100} value={range} onChange={(e) => onRange(Number(e.target.value))} style={{ width: "100%" }} aria-label="Range in metres" />
+              <div style={tickRow}><span>Short — 300 m</span><span>3000 m</span></div>
+            </div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={fireOne} style={btnPrimary}>Fire One</button>
+              <button onClick={() => setVolleySeed((Math.random() * 1e9) | 0)} style={btnSecondary}>Fire Volley (1000)</button>
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 14, color: PAL.text }}>
+              <input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} aria-label="Compare legacy model" />
+              Compare Legacy
             </label>
-            <input id="range" type="range" min={300} max={3000} step={100} value={range} onChange={(e) => onRange(Number(e.target.value))} style={{ width: "100%" }} aria-label="Range in metres" />
-            <div style={tickRow}><span>Short — 300 m</span><span>3000 m</span></div>
+            <button onClick={clearShots} style={btnGhostCard}>Clear Shots</button>
           </div>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={fireOne} style={btnPrimary}>Fire one</button>
-            <button onClick={() => setVolleySeed((Math.random() * 1e9) | 0)} style={btnSecondary}>Fire volley (1000)</button>
-          </div>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 14, color: PAL.text }}>
-            <input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} aria-label="Compare legacy model" />
-            Compare legacy
-          </label>
-          <button onClick={clearShots} style={btnGhost}>Clear shots</button>
         </div>
       </div>
 
       <div className="gallery" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginTop: 18 }}>
-        <StatCard title="Hit probability" big={`${fmtPct(hasrdHit)}%`} sub={`legacy claims ${fmtPct(legacyHit)}%`} />
-        <StatCard title="Crosswind speed" big={`${sigma.toFixed(2)} m/s`} sub={`legacy assumes ${LEGACY_SIGMA.toFixed(2)}`} />
+        <StatCard title="Hit Probability" big={`${fmtPct(hasrdHit)}%`} sub={`legacy claims ${fmtPct(legacyHit)}%`} />
+        <StatCard title="Crosswind Speed" big={`σ = ${sigma.toFixed(2)} m/s`} sub={`legacy assumes σ = ${LEGACY_SIGMA.toFixed(2)}`} />
       </div>
 
-      <p style={{ ...capStyle, marginTop: 14 }}>
+      <p style={{ ...capStyle, marginTop: 14, color: PAL.canvasMuted }}>
         Push the range short and both groups collapse onto the target — the
         legacy model looks fine. Drag it back to 3000 m and they peel apart:
         over grass the real group is far wider than legacy assumes, over
@@ -1126,32 +1175,47 @@ function Screen4({ terrain, setTerrain, onBack }) {
 }
 function StatCard({ title, big, sub }) {
   return (
-    <div style={{ background: "#fff", border: `1px solid rgba(110,106,87,0.25)`, borderRadius: 4, padding: "16px 18px" }}>
+    <div style={{ background: PAL.panel, border: `1px solid rgba(59,46,34,0.18)`, borderRadius: 4, padding: "16px 18px" }}>
       <div style={{ fontSize: 12, letterSpacing: 0.4, textTransform: "uppercase", color: PAL.text2 }}>{title}</div>
-      <div style={{ fontSize: 32, fontWeight: 700, color: PAL.terra, marginTop: 4, lineHeight: 1.1 }}>{big}</div>
+      <div style={{ fontSize: 30, fontWeight: 700, color: PAL.terra, marginTop: 4, lineHeight: 1.1 }}>{big}</div>
       <div style={{ fontSize: 13, color: PAL.legacy, marginTop: 4 }}>{sub}</div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Shared controls + layout bits
+// Shared helpers, controls, layout
 // ---------------------------------------------------------------------------
+function hexRgb(h) {
+  h = h.replace("#", "");
+  return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+}
+function rgbHex(a) {
+  return "#" + a.map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("");
+}
+function lerpHex(a, b, t) {
+  const A2 = hexRgb(a), B2 = hexRgb(b);
+  return rgbHex(A2.map((v, i) => v + (B2[i] - v) * t));
+}
+function terrainColor(t) {
+  return t <= 0.5 ? lerpHex(PAL.grass, PAL.bushes, t / 0.5) : lerpHex(PAL.bushes, PAL.forest, (t - 0.5) / 0.5);
+}
+
 function TerrainSlider({ terrain, setTerrain }) {
   return (
     <div>
       <label htmlFor="terrain" style={sliderLabel}>
-        Terrain <span style={{ color: PAL.text2 }}>{terrainName(terrain)} · σ {sigmaForTerrain(terrain).toFixed(2)} m/s</span>
+        Terrain <span style={{ color: PAL.text2 }}>{terrainName(terrain)} · σ = {sigmaForTerrain(terrain).toFixed(2)} m/s</span>
       </label>
       <input id="terrain" type="range" min={0} max={1} step={0.01} value={terrain} onChange={(e) => setTerrain(Number(e.target.value))} style={{ width: "100%" }} aria-label="Terrain from grassy field to forest" />
-      <div style={tickRow}><span>Grassy field</span><span>Bushes</span><span>Forest</span></div>
+      <div style={tickRow}><span>Grassy Field</span><span>Bushes</span><span>Forest</span></div>
     </div>
   );
 }
 function NextBar({ onNext, onBack }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", marginTop: 24 }}>
-      {onBack ? <button onClick={onBack} style={btnGhost}>← back</button> : <span />}
+      {onBack ? <button onClick={onBack} style={btnGhostOnCanvas}>← Back</button> : <span />}
       <button onClick={onNext} style={btnPrimary}>Next →</button>
     </div>
   );
@@ -1165,7 +1229,7 @@ export default function HasrdAdvantage() {
   const [terrain, setTerrain] = useState(0);
 
   return (
-    <div className="hz" style={{ background: PAL.canvas, color: PAL.text, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif", minHeight: "100%", padding: "28px 22px 60px" }}>
+    <div className="hz" style={{ background: PAL.canvas, color: PAL.canvasText, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif", minHeight: "100%", padding: "28px 22px 60px" }}>
       <style>{CSS}</style>
       <div style={{ maxWidth: 860, margin: "0 auto" }}>
         {screen === 0 ? (
@@ -1181,7 +1245,7 @@ export default function HasrdAdvantage() {
           </>
         )}
 
-        <footer style={{ marginTop: 40, fontSize: 11.5, color: PAL.text2, borderTop: "1px solid rgba(110,106,87,0.25)", paddingTop: 12 }}>
+        <footer style={{ marginTop: 40, fontSize: 11.5, color: PAL.canvasMuted, borderTop: "1px solid rgba(244,240,226,0.2)", paddingTop: 12 }}>
           Illustrative — impact scatter is generated, calibrated to reproduce
           published thesis results (range 3000 m, 2.3 m target).
         </footer>
@@ -1193,26 +1257,26 @@ export default function HasrdAdvantage() {
 // ---------------------------------------------------------------------------
 // Style tokens
 // ---------------------------------------------------------------------------
-const hStyle = { fontSize: 21, fontWeight: 700, margin: "4px 0 6px", letterSpacing: -0.3 };
-const h3Style = { fontSize: 15, fontWeight: 700, margin: "0 0 6px" };
-const leadStyle = { color: PAL.text2, fontSize: 15, lineHeight: 1.55, maxWidth: 660, margin: "0 0 14px" };
+const hStyle = { fontSize: 21, fontWeight: 700, margin: "4px 0 6px", letterSpacing: -0.3, color: PAL.canvasText };
+const h3Style = { fontSize: 15, fontWeight: 700, margin: "0 0 6px", color: PAL.text };
+const sectionLead = { color: PAL.canvasMuted, fontSize: 15, lineHeight: 1.55, maxWidth: 720, margin: "0 auto 16px", textAlign: "center" };
 const pStyle = { color: PAL.text, fontSize: 14, lineHeight: 1.6, margin: "0 0 12px" };
-const ulStyle = { color: PAL.text, fontSize: 14, lineHeight: 1.7, margin: "0 0 12px", paddingLeft: 20 };
 const capStyle = { color: PAL.text2, fontSize: 13, lineHeight: 1.5, margin: 0 };
-const panelCard = { background: "#fff", border: "1px solid rgba(110,106,87,0.25)", borderRadius: 4, padding: 16, margin: "0 0 20px" };
+const panelCard = { background: PAL.panel, border: "1px solid rgba(59,46,34,0.18)", borderRadius: 4, padding: 16, margin: "0 0 20px", color: PAL.text };
 const panelHalf = { ...panelCard, flex: 1, margin: 0 };
-const sliderLabel = { display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6, letterSpacing: 0.2 };
+const sliderLabel = { display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6, letterSpacing: 0.2, color: PAL.text };
 const tickRow = { display: "flex", justifyContent: "space-between", fontSize: 11, color: PAL.text2, marginTop: 2 };
 const btnBase = { border: "none", borderRadius: 3, padding: "9px 16px", fontSize: 14, fontWeight: 600, cursor: "pointer", letterSpacing: 0.2 };
 const btnPrimary = { ...btnBase, background: PAL.terra, color: "#fff" };
-const btnSecondary = { ...btnBase, background: PAL.hasrd, color: "#fff" };
-const btnGhost = { ...btnBase, background: "transparent", color: PAL.text2, border: "1px solid rgba(110,106,87,0.4)" };
-const backLink = { ...btnBase, background: "transparent", color: PAL.text2, padding: "4px 0", fontWeight: 500, marginBottom: 6 };
-const inlineInfoBtn = { background: "none", border: "none", padding: 0, color: PAL.hasrd, fontWeight: 700, textDecoration: "underline", cursor: "pointer", font: "inherit" };
+const btnSecondary = { ...btnBase, background: PAL.windLineC, color: "#fff" };
+const btnGhostOnCanvas = { ...btnBase, background: "transparent", color: PAL.canvasText, border: "1px solid rgba(244,240,226,0.5)" };
+const btnGhostCard = { ...btnBase, background: "transparent", color: PAL.text2, border: "1px solid rgba(59,46,34,0.35)" };
+const backLink = { ...btnBase, background: "transparent", color: PAL.canvasText, padding: "4px 0", fontWeight: 500, marginBottom: 6 };
+const inlineInfoBtn = { background: "none", border: "none", padding: 0, color: PAL.windLineC, fontWeight: 700, textDecoration: "underline", cursor: "pointer", font: "inherit" };
 
 const CSS = `
 .hz *{box-sizing:border-box}
-.hz button:focus-visible,.hz input:focus-visible{outline:2px solid ${PAL.terra};outline-offset:2px}
+.hz button:focus-visible,.hz input:focus-visible{outline:2px solid ${PAL.terraBright};outline-offset:2px}
 .hz input[type=range]{accent-color:${PAL.terra};height:24px}
 .hz button{transition:opacity .12s ease}
 .hz button:hover{opacity:.88}
