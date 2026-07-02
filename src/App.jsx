@@ -1232,22 +1232,22 @@ function Screen4({ terrain, setTerrain, onBack }) {
               <text x={79} y={TARGET.y + 30} textAnchor="middle" fontSize={12} fontWeight={700} fontFamily="monospace" fill={PAL.mono}>Tank</text>
             </g>
 
-            {volley && compare && <Ellipse2sig sigma={LEGACY_SIGMA} R={range} color={PAL.legacyPop} />}
+            {volley && compare && <Ellipse2sig sigma={LEGACY_SIGMA} R={range} color={PAL.mono} />}
             {volley && <Ellipse2sig sigma={sigma} R={range} color={PAL.terraBright} />}
-            {volley && compare && <Scatter pts={volley.legacy} color={PAL.legacyPop} opacity={0.55} />}
-            {volley && <Scatter pts={volley.hasrd} color={PAL.mono} opacity={0.75} />}
+            {volley && compare && <Scatter pts={volley.legacy} color={PAL.mono} opacity={.65} />}
+            {volley && <Scatter pts={volley.hasrd} color={PAL.terra} opacity={1} />}
 
             {singles.map((p, i) => (
-              <circle key={i} cx={TARGET.x + p[0] * SCALE} cy={TARGET.y - p[1] * SCALE} r={2.6} fill={PAL.mono} />
+              <circle key={i} cx={TARGET.x + p[0] * SCALE} cy={TARGET.y - p[1] * SCALE} r={2.6} fill={PAL.terraBright} />
             ))}
-            {proj && <circle cx={proj.cx} cy={proj.cy} r={3} fill={PAL.mono} />}
+            {proj && <circle cx={proj.cx} cy={proj.cy} r={3} fill={PAL.terraBright} />}
 
             <TargetSquare x={TARGET.x - HALF * SCALE} y={TARGET.y - HALF * SCALE} size={2 * HALF * SCALE} crosshair crosshairColor={PAL.mono} />
             <text x={TARGET.x} y={TARGET.y + HALF * SCALE + 20} textAnchor="middle" fontSize={12} fontWeight={700} fontFamily="monospace" fill={PAL.mono}>2.3 x 2.3 m Target</text>
 
             <g>
               <line x1={O.x} y1={O.y} x2={O.x + rangeLeg} y2={O.y} stroke={PAL.legacyPop} strokeWidth={2.2} strokeDasharray="4 4" />
-              <text x={O.x + rangeLeg / 2} y={O.y + 16} textAnchor="middle" fontSize={10} fontFamily="monospace" fill={PAL.legacyPop}>Range Wind</text>
+              <text x={O.x + rangeLeg / 2} y={O.y + 16} textAnchor="middle" fontSize={10} fontFamily="monospace" fill={PAL.mono}>Range Wind</text>
               {/* crosswind leg */}
               <Arrow x1={tip.x} y1={O.y} x2={tip.x} y2={tip.y} color={PAL.terraBright} width={3} />
               <text x={tip.x + 8} y={(O.y + tip.y) / 2} fontSize={10} fontFamily="monospace" fill={PAL.terraBright}>Crosswind</text>
